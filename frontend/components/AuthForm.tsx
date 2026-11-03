@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/context/AuthContext";
+import axios from "axios";
+import axiosInstance from "@/libs/axiosinstances";
+
 import {
   ArrowRight,
   BookOpen,
@@ -14,6 +17,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+
 import Logo from "/assets/logo.png";
 import Image from "next/image";
 
@@ -30,11 +34,14 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  // One state for all form fields
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+  });
 
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -55,12 +62,10 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const description = {
     login:
       "Sign in to your account to continue reading and writing amazing stories.",
-    signup:
-      "Create your account and start sharing your ideas with the world.",
+    signup: "Create your account and start sharing your ideas with the world.",
     "forgot-password":
       "Enter your email address and we'll help you recover your account.",
-    "reset-password":
-      "Choose a new password to secure your account.",
+    "reset-password": "Choose a new password to secure your account.",
   }[mode];
 
   const submitLabel = {
@@ -70,51 +75,111 @@ export default function AuthForm({ mode }: AuthFormProps) {
     "reset-password": "Update Password",
   }[mode];
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  // Handle all input changes using formData
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    const { name, value } = e.target;
+
+    setFormData((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  }
+
+  // Handle form submission
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     setError("");
     setMessage("");
+    setLoading(true);
 
-    if (isLogin) {
-      const success = login(email.trim(), password);
+    try {
+      // LOGIN
+      if (isLogin) {
+        const success = await login(formData.email.trim(), formData.password);
 
-      if (success) {
+        if (!success) {
+          setError("Invalid email or password.");
+          return;
+        }
+
         router.replace("/admin");
-      } else {
-        setError("Invalid email or password.");
-      }
-
-      return;
-    }
-
-    if (isSignup) {
-      // Connect this form to your registration API when it is ready.
-      setError(
-        "Account registration is not connected yet. Please try again later.",
-      );
-      return;
-    }
-
-    if (isForgotPassword) {
-      // Connect this form to your password-reset email API.
-      setError(
-        "Password recovery is not connected yet. Please try again later.",
-      );
-      return;
-    }
-
-    if (isResetPassword) {
-      if (password !== confirmPassword) {
-        setError("Passwords do not match.");
         return;
       }
 
-      // A real implementation must validate a reset token on the server.
-      setError(
-        "Password updating is not connected yet. Please use the password-reset API when it is available.",
-      );
-    }
+      // SIGNUP
+      if (isSignup) {
+        const response = await axiosInstance.post("/auth/register", {
+          name: formData.name.trim(),
+          email: formData.email.trim(),
+          password: formData.password,
+        });
+
+        setMessage(response.data.message || "Registration successful!");
+
+        // Go to OTP verification page
+        router.push(
+          `/verify-otp?email=${encodeURIComponent(formData.email.trim())}`,
+        );
+
+        return;
+      }
+
+      // FORGOT PASSWORD
+      if (isForgotPassword) {
+        const response = await axiosInstance.post("/auth/forgot-password", {
+          email: formData.email.trim(),
+        });
+
+        setMessage(
+          response.data.message ||
+            "Password reset instructions have been sent to your email.",
+        );
+
+        return;
+      }
+
+      // RESET PASSWORD
+      if (isResetPassword) {
+        // Read reset token from URL query parameter
+        const resetToken = new URLSearchParams(window.location.search).get(
+          "token",
+        );
+
+        if (!resetToken) {
+          setError("Password reset token is missing or invalid.");
+          return;
+        }
+
+        const response = await axiosInstance.post("/auth/reset-password", {
+          token: resetToken,
+          password: formData.password,
+        });
+
+        setMessage(response.data.message || "Password updated successfully!");
+
+        // Redirect to login after successful password reset
+        router.push("/login");
+      }
+    } catch (err: unknown) {
+      let errorMessage = "Something went wrong. Please try again.";
+
+      if (axios.isAxiosError(err)) {
+        console.error("API Error:", err.response?.data);
+        console.error("Status:", err.response?.status);
+        console.error("URL:", err.config?.url);
+
+        errorMessage =
+          err.response?.data?.message || err.message || errorMessage;
+      } else if (err instanceof Error) {
+        console.error("General Error:", err);
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
+    }finally {
+    setLoading(false);
+  }
   }
 
   return (
@@ -128,10 +193,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
           <div className="relative z-10 flex items-center gap-2">
             <BookOpen size={25} strokeWidth={1.7} />
 
-            <p
-              className="w-10 h-10 font-medium text-black transition hover:text-gray-500 sm:text-3xl"
-            >
-              <Image src={Logo} alt="Logo"/>
+            <p className="w-10 h-10 font-medium text-black transition hover:text-gray-500 sm:text-3xl">
+              <Image src={Logo} alt="Logo" />
             </p>
           </div>
 
@@ -165,11 +228,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
                   <div
                     key={initial}
                     className={`flex size-10 items-center justify-center rounded-full border-2 border-white text-sm font-medium text-white ${
-                      [
-                        "bg-[#657b86]",
-                        "bg-[#9b8276]",
-                        "bg-[#535f68]",
-                      ][index]
+                      ["bg-[#657b86]", "bg-[#9b8276]", "bg-[#535f68]"][index]
                     }`}
                   >
                     {initial}
@@ -179,9 +238,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
               <div className="text-sm leading-5 text-gray-700">
                 <p className="font-medium">A community of thinkers</p>
-                <p className="text-gray-500">
-                  Read, write, and grow together.
-                </p>
+                <p className="text-gray-500">Read, write, and grow together.</p>
               </div>
             </div>
           </div>
@@ -220,10 +277,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
                 </label>
 
                 <div className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 transition focus-within:border-gray-500 focus-within:ring-2 focus-within:ring-black/5">
-                  <UserRound
-                    size={19}
-                    className="shrink-0 text-gray-400"
-                  />
+                  <UserRound size={19} className="shrink-0 text-gray-400" />
 
                   <input
                     id="name"
@@ -232,8 +286,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
                     autoComplete="name"
                     placeholder="Your full name"
                     required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    value={formData.name}
+                    onChange={handleChange}
                     className="w-full bg-transparent py-3.5 text-sm outline-none placeholder:text-gray-400"
                   />
                 </div>
@@ -260,8 +314,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
                     autoComplete="email"
                     placeholder="you@example.com"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={formData.email}
+                    onChange={handleChange}
                     className="w-full bg-transparent py-3.5 text-sm outline-none placeholder:text-gray-400"
                   />
                 </div>
@@ -279,18 +333,13 @@ export default function AuthForm({ mode }: AuthFormProps) {
                 </label>
 
                 <div className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 transition focus-within:border-gray-500 focus-within:ring-2 focus-within:ring-black/5">
-                  <LockKeyhole
-                    size={19}
-                    className="shrink-0 text-gray-400"
-                  />
+                  <LockKeyhole size={19} className="shrink-0 text-gray-400" />
 
                   <input
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
-                    autoComplete={
-                      isLogin ? "current-password" : "new-password"
-                    }
+                    autoComplete={isLogin ? "current-password" : "new-password"}
                     placeholder={
                       isLogin
                         ? "Enter your password"
@@ -298,8 +347,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
                     }
                     minLength={8}
                     required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    value={formData.password}
+                    onChange={handleChange}
                     className="w-full bg-transparent py-3.5 text-sm outline-none placeholder:text-gray-400"
                   />
 
@@ -311,44 +360,8 @@ export default function AuthForm({ mode }: AuthFormProps) {
                     }
                     className="shrink-0 text-gray-400 transition hover:text-black"
                   >
-                    {showPassword ? (
-                      <EyeOff size={19} />
-                    ) : (
-                      <Eye size={19} />
-                    )}
+                    {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
                   </button>
-                </div>
-              </div>
-            )}
-
-            {/* Confirm password */}
-            {isResetPassword && (
-              <div className="space-y-2">
-                <label
-                  htmlFor="confirmPassword"
-                  className="text-sm font-medium text-gray-800"
-                >
-                  Confirm New Password
-                </label>
-
-                <div className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 transition focus-within:border-gray-500 focus-within:ring-2 focus-within:ring-black/5">
-                  <LockKeyhole
-                    size={19}
-                    className="shrink-0 text-gray-400"
-                  />
-
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    placeholder="Confirm your new password"
-                    minLength={8}
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-transparent py-3.5 text-sm outline-none placeholder:text-gray-400"
-                  />
                 </div>
               </div>
             )}
@@ -379,17 +392,11 @@ export default function AuthForm({ mode }: AuthFormProps) {
             {isSignup && (
               <p className="text-xs leading-5 text-gray-500">
                 By creating an account, you agree to our{" "}
-                <Link
-                  href="/terms"
-                  className="underline underline-offset-4"
-                >
+                <Link href="/terms" className="underline underline-offset-4">
                   Terms
                 </Link>{" "}
                 and{" "}
-                <Link
-                  href="/privacy"
-                  className="underline underline-offset-4"
-                >
+                <Link href="/privacy" className="underline underline-offset-4">
                   Privacy Policy
                 </Link>
                 .
@@ -419,9 +426,10 @@ export default function AuthForm({ mode }: AuthFormProps) {
             {/* Submit button */}
             <button
               type="submit"
+              disabled={loading}
               className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#171717] px-5 py-3.5 text-sm font-medium text-white transition duration-200 hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2"
             >
-              {submitLabel}
+              {loading ? "Please wait..." : submitLabel}
 
               <ArrowRight
                 size={17}
