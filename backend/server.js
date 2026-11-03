@@ -8,10 +8,9 @@ conntectDB();
 
 const app = express();
 
-app.get("/", (req, res) => {
-  res.send("Hello from express!");
-});
-
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use("/auth", AuthRoutes);
 
 const PORT = process.env.PORT || 5000;
