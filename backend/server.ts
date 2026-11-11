@@ -1,11 +1,13 @@
+
 import express from "express";
 import dotenv from "dotenv";
-import conntectDB from "./libs/db.js";
+import cors from "cors";
+
+import connectDB from "./libs/db.js";
+import { connectRedis } from "./config/redis.js";
 import { AuthRoutes } from "./routes/AuthRoutes.js";
-import cors from 'cors';
 
 dotenv.config();
-conntectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,15 +20,23 @@ app.use(
   })
 );
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
 app.use("/auth", AuthRoutes);
 
+const startServer = async () => {
+  try {
+    await connectDB();
+    await connectRedis();
 
+    app.listen(PORT, () => {
+      console.log(`Server running at port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Server startup failed:", error);
+    process.exit(1);
+  }
+};
 
-app.listen(PORT, () => {
-  console.log(`Server running at port ${PORT}`);
-});
+startServer();
